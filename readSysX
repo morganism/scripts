@@ -1,0 +1,5 @@
+#!/bin/csh
+
+set READER = `find ~ -name "sysX_reader.pl"`
+
+${READER} $*

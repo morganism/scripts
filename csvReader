@@ -1,0 +1,238 @@
+#!/usr/bin/perl
+
+##################################################
+# CSV file reader for cdrGen
+# I need to determine why the SystemX Generator
+# fails and complains about invalid fields passed
+# to it.
+##################################################
+
+@typeH = qw (
+	Record_Type_for_Java
+	adpu_type
+	Gbit 
+	Dbit
+	Linking_Field
+	Sequence_Number 																																
+);
+
+@type15 = qw (
+	Record_Type
+	Length
+	Type
+	Record_use
+	call_type
+	Origination_Date
+	OriginatingLineIdIndication
+	Discontinuity_Flag
+	ignored,_needs_to_be_populated
+	Termination_Reason
+	Clearing_Cause
+	Originating_Line_Id
+	Route_number
+	Telpehony_Process
+	PBXSuffix
+	Incomigng_Route_Number
+	Incoming_Telphony_Process
+	Outgoing_RouteNumber
+	Outgoing_Telephony_Process
+	Cost_Code
+	Type_of_Call
+	Intercepted_Call_indicator
+	Diversion_Dual_Access
+	Record_Linking_Field
+	Nodal_Point_Code
+	Answer_Date
+	Disconnect_Date
+	Pre_Answer_UU_Count
+	Post_Answer_UU_Count_Block_Count
+	Post_AnswereUU_Count_Message_Count
+	Service_Identifier
+	Facility_Field
+	Calling_party_category
+	Called_Number
+	Translated_Address_Digits
+);
+
+@type12 = qw (
+	Record_Type
+	Length
+	Type
+	Record_use
+	call_type
+	Origination_Date
+	OriginatingLineIdIndication
+	Discontinuity_Flag
+	ignored__needs_to_be_populated
+	Termination_Reason
+	Called_Subscriber_Identity_Indicator
+	Clearing_Cause
+	Originating_Line_Id
+	Route_number
+	Telpehony_Process
+	PBXSuffix
+	Outgoing_RouteNumber
+	Outgoing_Telephony_Process
+	Cost_Code
+	Type_of_Call
+	Intercepted_Call_indicator
+	Diversion_Dual_Access
+	Record_Linking_Field
+	Nodal_Point_Code
+	Answer_Date
+	Disconnect_Date
+	Pre_Answer_UU_Count
+	Post_Answer_UU_Count_Block_Count
+	Post_AnswereUU_Count_Message_Count
+	Service_Identifier
+	Facility_Field
+	Calling_party_category
+	Translated_Nmber
+);
+
+@typeI12 = qw (
+	Record_Type_for_Java
+	Length
+	Record_Type
+	Record_Use
+	Call_Type
+	Call_Effective
+	Time_of_Seize
+	Originating_Line_Id_Indication
+	Discontinuity_Flag
+	Answered_Indication
+	Diverted_Call_Indicator
+	Route_Group_Direction
+	Clearing_Cause
+	Originating_Line_Id
+	PBX_suffix
+	Route_Number
+	Telephony_Process
+	Route_Group
+	Sampling_Category_Type
+	Record_Linking_Field
+	Nodal_Point_Code
+	Charge_Band
+	calling_party
+	call_sampling
+	sampling_mode
+	count_reset_indicator
+	value_1_in_N
+	originating_Netword_Id
+	Termination_Reason
+	Incoming_Route_Id_Route
+	Incoming_Route_Id_Unit
+	Outgoing_Route_Id_Route
+	Outgoing_Route_ID_Unit
+	Time_Address_Complete
+	Time_Answer
+	Time_Calling_party_cleas
+	time_called_party_clear
+	called_number
+);	
+
+@type5 = qw (
+	Record_Type
+	Length
+	Type
+	Record_use
+	Data_Type
+	Seize_Date
+	Diverting_Line_Id
+	Time_Discontinuity
+	Diverted_Call_indicator
+	Clearing_Cause
+	Originating_Line_Id
+	PBX_Suffix
+	Route_Number
+	Telephony_Process
+	Route_Group
+	Sampling_Category
+	Route_Group_Type
+	Record_Linking_Field
+	Logging_Exchange_Identifier
+	Charge_Band
+	Calling_Party_Category
+	Call_Sampling
+	Sampling_Mode
+	Count_Reset_Indicator
+	Value_1_in_N
+	Address_Complete_date
+	Answer_Date
+	Calling_Party_Clear_Date
+	Called_Party_Clear_Date
+	Called_Number 
+);	
+
+@type6 = @type5;
+
+$helpMsg = "-" x 40 . "\n\n Read a CSV file for input to the\n
+ CDRGenerator and explain the fields for types\n\n
+I5/6,C5/6,I12,12,15\n\n" . "-" x 40 . "\n\n
+USAGE: csvReader INPUT.CSV\n\n";
+
+print $helpMsg unless ( @ARGV );
+
+while ( @ARGV )
+{
+	my $file = shift @ARGV;
+	readCSV ( $file );
+}
+
+exit;
+
+sub readCSV
+{
+	my $file = shift;
+
+	print "\n\n ------------------------- \n\n";
+
+	open (IN, "$file");
+
+	my $l = 0;
+	while ( <IN> )
+	{
+		$l++;
+		my @fields = split /,/;
+		my $f = 0;
+		print "\n\n";
+		foreach $field (@fields)
+		{
+			
+			next unless ( length($fields[$f] ) );
+			if ( $fields[0] eq "15" )
+			{
+				my $begin = substr("$l:$f:$type15[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			elsif ($fields[0] eq "12" )
+			{
+				my $begin = substr("$l:$f:$type12[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			elsif ($fields[0] eq "I12" )
+			{
+				my $begin = substr("$l:$f:$typeI12[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			elsif ($fields[0] eq "H" )
+			{
+				my $begin = substr("$l:$f:$typeH[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			elsif ($fields[0] =~ /[IC]5/ )
+			{
+				my $begin = substr("$l:$f:$type5[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			elsif ($fields[0] =~ /[IC]6/ )
+			{
+				my $begin = substr("$l:$f:$type6[$f] " . "." x 50,0,50);
+				print "$begin \t $field \n";
+			}
+			$f++;
+		}
+	}
+	close IN;
+	print "\n\n ------------------------- \n\n";
+}

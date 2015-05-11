@@ -1,0 +1,251 @@
+#!/usr/bin/perl
+
+##################################################
+# script   : parseASN1Tree
+# author   : Cartesian Limited
+# author   : msziraki
+# date     : Wed Nov 13 13:37:08 GMT 2013
+# $Revision: 1.7 
+##################################################
+$version = "$Revision: 1.7 $number";
+
+use Data::Dumper;
+
+# N.B.: add lexically scoped variables and assign them in getArgs ($file, below)
+my $file;
+
+# comment this out if necessary
+usage() unless (@ARGV);
+getArgs(@ARGV);
+
+
+
+# begin MAIN section
+
+# read the input file 
+my @lines = ();
+open IN, $file;
+open OUT, ">$file.cooked";
+while (<IN>)
+{
+	chomp;
+	s/\s+/ /g;
+	s/^ //;
+	next if (/--/);
+	next if (/^$/);
+	push @lines, $_;
+	print OUT "$_\n";
+}
+close OUT;
+close IN;
+
+my $struct;
+my $lastNode;
+my $lastType;
+for (my $i = 0; $i < (scalar(@lines)); $i++)
+{
+	my $l = $lines[$i];
+	$l =~ s/\s+/ /g;
+	$l =~ s/^ //;
+	next if ($l =~ /--/);
+	next if ($l =~ /^$/);
+
+	# on it's own : 
+	# UserProvidedCallingPartyNumber ::= BCDDirectoryNumber
+	my $nextLine = $lines[$i + 1];
+	if (($l =~ /::=/) and ($nextLine ne '{'))
+	{
+		#print "On it's own [$l]\n";
+		my @parts = split / /, $l;
+		my $node = shift @parts;
+		shift @parts; # ::=
+		my $type = shift @parts;
+		my $size = join " ", @parts;
+		$struct->{$node}->{type} = $type;
+		$struct->{$node}->{size} = $size if ($size);
+	}
+	# part of a block
+	#UserTypeofIMSSF ::= ENUMERATED
+	#{
+	#imssf-user-type (0),
+	#imssf-user-Butt (255)
+	#}
+	elsif ($l eq '{')
+	{
+		#print "open bracket\n";
+		my $info = $lines[$i - 1];
+		my @parts = split / /, $info;
+		my $node = shift @parts;
+		shift @parts; # ::=
+		my $type = shift @parts;
+		my $size = join " ", @parts;
+		$struct->{$node}->{type} = $type;
+		$struct->{$node}->{size} = $size if ($size);
+
+		$lastNode = $node;
+		$lastType = $type;
+	}
+	elsif ($l eq '}')
+	{
+		print "$i : close bracket\n";
+		$lastNode = undef;
+		$lastType = undef;
+	}
+	elsif (defined $lastNode)
+	{
+		#print "Defined last node\n";
+		my @parts = split / /, $l;
+		my $node = shift @parts;
+		my $type;
+		my $value;
+		if ($lastType eq 'ENUMERATED')
+		{
+			$value = join " ", @parts;
+			$value =~ s/,//g;
+			$value =~ s/[()]*//g;
+			$struct->{$node}->{value} = $value;
+		}
+		else
+		{	
+			$l =~ s/,//g;
+			shift @parts; # ::=
+			$type = shift @parts;
+			$struct->{$node}->{type} = $type;
+		}
+#		print "$i : $lastNode.$node.VALUE [$value]\n";
+#		my $lastLine = $lines[$i - 1];
+#		print "$i : ll [$lastLine]\n";
+#		print "$i : l [$l]\n";
+		my $child = {};
+		$child->{node} = $node;
+		$child->{type} = $type if ($type);
+		$child->{value} = $value if (length($value));
+		push @{$struct->{$lastNode}->{children}}, $child;
+		
+	}
+}
+
+print Dumper($struct);
+
+
+
+
+# put subs below here
+
+# display some help
+sub usage
+{
+	my $script = $0;
+	my @parts = split /\//, $script;
+	$script = pop(@parts);
+	$script =~ s/\.\///;
+	print "	$script Version: $version\n\n";
+	print "	USAGE:\n\n";
+	print "		$script [{-h|--help}] [{-v|--version}] {-f|--file} filename\n\n";
+	print "\n";
+	print "	ARGUMENTS:\n";
+	print "		 -h, --help        Display this usage screen.\n";
+	print "		 -v, --version     Display version information.\n";
+	print "		 -f, --file        Specify ASN.1 filename.\n";
+	print "\n";
+	print "	NOTES:\n";
+}
+
+# process the arguments -- add as necessary
+sub getArgs
+{
+	while (@_)
+	{
+		my $arg = shift;
+		if ($arg =~ /-h/ || $arg =~ /--help/)
+		{
+			usage();
+			exit;
+		}
+		elsif ($arg =~ /-v/ || $arg =~ /--version/)
+		{
+			print "Version: $version\n";
+			exit;
+		}
+		elsif ($arg =~ /-f/ || $arg =~ /--file/)
+		{
+			$file = shift;
+		}
+	}
+}
+
+
+=head1 NAME
+
+parseASN1Tree - Some short description
+
+
+=head1 SYNOPSIS
+
+B<parseASN1Tree> [OPTION] ...
+
+=head1 DESCRIPTION
+
+Place a desription of this here.
+
+=head2 OPTIONS        
+
+Should include options and parameters.
+
+
+B<-h, --help>
+        display some help and usage.
+
+B<-v, --version>
+        display version information.
+
+
+=head1 USAGE
+
+Usage information goes here.
+
+
+=head1 EXAMPLES
+
+Place examples here.
+
+=head1 RETURN VALUES  
+
+Sections two and three function calls.
+
+=head1 ENVIRONMENT    
+
+Describe environment variables.
+
+=head1 FILES          
+
+Files associated with the subject.
+
+=head1 DIAGNOSTICS    
+
+Normally used for section 4 device interface diagnostics.
+
+=head1 ERRORS         
+
+Sections two and three error and signal handling.
+
+=head1 SEE ALSO       
+
+Cross references and citations.
+
+=head1 STANDARDS      
+
+Conformance to standards if applicable.
+
+=head1 BUGS           
+
+Gotchas and caveats.
+
+=head1 SECURITY CONSIDERATIONS
+
+=head1 COPYRIGHT
+
+Copyright 2013, Cartesian Limited
+
+=cut
+

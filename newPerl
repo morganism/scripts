@@ -1,0 +1,257 @@
+#!/usr/bin/perl
+
+##################################################
+# script   : newPerl
+# author   : Cartesian Limited
+# author   : msziraki
+# date     : Wed Apr  3 12:36:27 BST 2002
+# $Revision: 1.7 $number
+##################################################
+$version = "$Revision: 1.7 $number";
+
+my $filename = shift || usage();
+
+my $div = "\#" x 50;
+$div .= "\n";
+
+# this is the standard component that appears at the top of your script
+my $boilerPlate = "\#\!" . `which perl` . "\n";
+$boilerPlate .= $div;
+$boilerPlate .= "\# script   : $filename\n";
+$boilerPlate .= "\# author   : Cartesian Limited\n";
+$boilerPlate .= "\# author   : " . `whoami`;
+$boilerPlate .= "\# date     : " . `date`;
+$boilerPlate .= "\# \$Revision: 1.7 $number\n";
+$boilerPlate .= $div;
+$boilerPlate .= '$version = "$Revision: 1.7 $number";';
+$boilerPlate .= "\n\n";
+
+if (-e $filename)
+{
+	print "File: $filename already exists\n";
+	print "Would you like to overwrite this file ? (y or n)\n";
+
+	$answer = <>;
+	chomp $answer;
+
+	exit if ($answer =~ /n/);
+
+	print "Overwriting $filename\n";
+}
+
+my $mainsection = "\# N.B.: add lexically scoped variables and assign them in getArgs (\$file, below)\n";
+$mainsection .= "my \$file\;\n\n";
+$mainsection .= "\# comment this out if necessary\n";
+$mainsection .= "usage() unless (\@ARGV)\;\n";
+$mainsection .= "getArgs(\@ARGV)\;\n\n\n\n";
+$mainsection .= "\# begin MAIN section\n\n";
+
+# add the standard file processing
+my $filehandler = "\# read the input file \n";
+$filehandler .= "open IN, \$file\;\n";
+$filehandler .= "while (<IN>)\n";
+$filehandler .= "{\n";
+$filehandler .= "\tchomp\;\n";
+$filehandler .= "\n";
+$filehandler .= "\t\# add stuff here\n";
+$filehandler .= "\tprint \"line = \$_\\n\"\;\n";
+$filehandler .= "}\n";
+$filehandler .= "close IN\;\n\n";
+
+my $subs = "\n\n\n\# put subs below here\n\n";
+
+# add the usage declaration and sub
+my $usage = "\# display some help\n";
+$usage .= "sub usage\n";
+$usage .= "{\n";
+$usage .= "\tmy \$script = \$0\;\n";
+$usage .= "\tmy \@parts = " . 'split /\//, $script' ."\;\n";
+$usage .= "\t" . '$script = pop(@parts)' . "\;\n";
+$usage .= "\t" . '$script =~ s/\.\///;' . "\n";
+$usage .= "\tprint \"\t\$script Version: \$version\\n\\n\"\;\n";
+$usage .= "\tprint \"\tUSAGE:\\n\\n\"\;\n";
+$usage .= "\tprint \"\t\t\$script [{-h|--help}] [{-v|--version}] {-f|--file} filename\\n\\n\"\;\n";
+$usage .= "\tprint \"\\n\"\;\n";
+$usage .= "\tprint \"\tARGUMENTS:\\n\"\;\n";
+$usage .= "\tprint \"\t\t -h, --help        Display this usage screen.\\n\"\;\n";
+$usage .= "\tprint \"\t\t -v, --version     Display version information.\\n\"\;\n";
+$usage .= "\tprint \"\t\t -f, --file        Specify filename.\\n\"\;\n";
+$usage .= "\tprint \"\\n\"\;\n";
+$usage .= "\tprint \"\tNOTES:\\n\"\;\n";
+$usage .= "}\n\n";
+
+
+# add the getArgs sub
+my $getargs = "\# process the arguments -- add as necessary\n";
+$getargs .= "sub getArgs\n";
+$getargs .= "{\n";
+$getargs .= "\twhile (\@_)\n";
+$getargs .= "\t{\n";
+$getargs .= "\t\tmy \$arg = shift\;\n";
+$getargs .= "\t\tif (\$arg eq '-h' || \$arg eq '--help')\n";
+$getargs .= "\t\t{\n";
+$getargs .= "\t\t\tusage()\;\n";
+$getargs .= "\t\t\texit\;\n";
+$getargs .= "\t\t}\n";
+$getargs .= "\t\telsif (\$arg eq '-v' || \$arg eq '--version')\n";
+$getargs .= "\t\t{\n";
+$getargs .= "\t\t\tprint \"Version: \$version\\n\"\;\n";
+$getargs .= "\t\t\texit\;\n";
+$getargs .= "\t\t}\n";
+$getargs .= "\t\telsif (\$arg eq '-f' || \$arg eq '--file')\n";
+$getargs .= "\t\t{\n";
+$getargs .= "\t\t\t\$file = shift\;\n";
+$getargs .= "\t\t}\n";
+$getargs .= "\t}\n";
+$getargs .= "}\n\n";
+
+
+my @parts = split /\//, $filename;
+my $scriptname = pop (@parts);
+my $year = `date`;
+chomp $year;
+$year =~ s/.*?(20[0-9]{2}).*?/$1/;
+
+my $pod = '
+=head1 NAME
+
+' . $scriptname . ' - Some short description
+
+
+=head1 SYNOPSIS
+
+B<' . $scriptname . '> [OPTION] ...
+
+=head1 DESCRIPTION
+
+Place a desription of this here.
+
+=head2 OPTIONS        
+
+Should include options and parameters.
+
+
+B<-h, --help>
+        display some help and usage.
+
+B<-v, --version>
+        display version information.
+
+
+=head1 USAGE
+
+Usage information goes here.
+
+
+=head1 EXAMPLES
+
+Place examples here.
+
+=head1 RETURN VALUES  
+
+Sections two and three function calls.
+
+=head1 ENVIRONMENT    
+
+Describe environment variables.
+
+=head1 FILES          
+
+Files associated with the subject.
+
+=head1 DIAGNOSTICS    
+
+Normally used for section 4 device interface diagnostics.
+
+=head1 ERRORS         
+
+Sections two and three error and signal handling.
+
+=head1 SEE ALSO       
+
+Cross references and citations.
+
+=head1 STANDARDS      
+
+Conformance to standards if applicable.
+
+=head1 BUGS           
+
+Gotchas and caveats.
+
+=head1 SECURITY CONSIDERATIONS
+
+=head1 COPYRIGHT
+
+Copyright ' .  $year . ', Cartesian Limited
+
+=cut
+
+';
+
+open OUT, ">$filename";
+print OUT $boilerPlate;
+print OUT $mainsection;
+print OUT $filehandler;
+print OUT $subs;
+print OUT $usage;
+print OUT $getargs;
+print OUT $pod;
+close OUT;
+
+`chmod 755 $filename`;
+
+
+
+sub usage
+{
+	print "\n" x 2;
+	print "Version: $version\n";
+	print "USAGE: newPerl <new file name>\n";
+	print "\n" x 2;
+	exit 1;
+}
+
+
+=head1 NAME
+
+newPerl  - Create a new perl script.
+
+
+=head1 SYNOPSIS
+
+B<newPerl> some_file_name
+
+=head1 EXAMPLES
+
+B<newPerl> some_file_name
+
+This will create a file called: some_file_name 
+The file will be executable, will have CVS headers, and will contain
+a POD documentation template to facilitate man page creation with
+B<pod2man>
+
+B<man> will look at B<MANPATH> when searching for man pages.
+
+=head1 ENVIRONMENT
+
+B<MANPATH> set this variable to point to a directory containing man1, man2, mann 
+directories. Place created man pages in the appropriate section.
+
+Edit /etc/bashrc for global implementation, be sure to set B<MANPATH> to globally
+visible directory.
+
+=head1 SEE ALSO
+
+pod2man(1)
+
+=head1 AUTHOR
+
+Cartesian Limited
+Morgan Sziraki
+
+=head1 COPYRIGHT
+
+Copyright 2004, Cartesian Limited
+
+=cut

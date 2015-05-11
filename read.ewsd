@@ -1,0 +1,645 @@
+#!/usr/bin/perl
+
+##################################################
+# script   : read.ewsd
+# author   : Cartesian Limited
+# author   : msziraki
+# date     : Mon Oct 18 13:33:30 BST 2004
+# $Revision: 1.0 
+##################################################
+$version = "$Revision: 1.1 $number";
+
+use Cwd 'abs_path';
+use Time::Local;
+
+# N.B.: add lexically scoped variables and assign them in getArgs ($file, below)
+my @files;
+my $output = "csv";
+my $transform;
+
+# comment this out if necessary
+usage() unless (@ARGV);
+getArgs(@ARGV);
+
+
+# this is the bytes remaining after the first byte which is packageId
+my %packageBytes =
+(
+	'66' => 3,
+	'67' => 3,
+	'68' => 2,
+	'69' => 8,
+	'6A' => 8,
+	'6B' => 9,	
+	'6C' => 9,	
+	'6E' => 5,	
+	'71' => 3,
+	'74' => 7,
+	'77' => 1,
+	'7A' => 2,
+	'82' => 4,
+	'86' => 5,
+	'87' => 4,
+	'88' => 5,
+	'8A' => 3,
+	'8B' => 2,
+	'8D' => 10,
+	'96' => 7,
+	'97' => 4,
+	'9A' => 5,
+	'9C' => 6,
+	'9D' => 5,
+	'B0' => 2,
+	'B1' => 3,
+	'B6' => 3,
+	'B8' => 7,
+	'B9' => 2,
+	'BA' => 2,
+	'BF' => 5,
+	'C2' => 2,
+	'C3' => 2
+);
+
+my %categories =
+(
+	0 => 'undefined',
+	1 => 'subscriber',
+	2 => 'priority subscriber',
+	3 => 'test equipment',
+	4 => 'coin box',
+	5 => 'operator national',
+	6 => 'data transmission national',
+	7 => 'subscriber or operator international without forward transfer',
+	8 => 'data transmission international',
+	9 => 'priority subscriber international',
+	10 => 'operator international with forward transfer',
+	11 => 'project specific',
+	12 => 'project specific',
+	13 => 'project specific',
+	14 => 'project specific',
+	15 => 'project specific'
+);
+
+# for es registration
+my $earliestStartDateTime;
+my $latestEndDateTime;
+
+my @fileArray;
+foreach $file (@files)
+{
+	if (-d $file)
+	{
+		parseDir($file);
+	}
+	else
+	{
+		push @fileArray, $file;
+	}
+}
+
+# read the input file (s)
+my $fh;
+foreach $f (@fileArray)
+{
+	next unless (-f $f);
+
+	if ($output eq "specific")
+	{
+		print "-" x 80 . "\n" ;
+		print "FILE:[$f]\n";
+		$recordNumber = 0;
+	}
+
+	open $fh, $f || die "Can't open file $f!\n";
+	readFile();
+	close $fh;
+
+	if ($output eq "specific")
+	{
+		print "EARLIEST = " . getPrintDate($earliestStartDateTime) . " " . getPrintTime($earliestStartDateTime) . "\n";
+		print "LATEST = " . getPrintDate($latestEndDateTime) . " " . getPrintTime($latestEndDateTime) . "\n";
+	}
+}
+
+
+sub readFile
+{
+	my $bytesRead = 1;
+	while ($bytesRead)
+	{
+		my $totalBytes = 0;
+
+		# packages that have been noticed but no data have
+		# been parsed from these
+		my @nopPackages = ();
+		my @packages = ();
+
+		$bytesRead = sysread $fh, $val, 1;
+		$totalBytes += $bytesRead;
+		$recordId = unpack ("H2", $val);
+
+		# this is the fillerKiller
+		if ($recordId eq "81")
+		{
+			$recordId = 0;
+			until ($recordId eq "84" || !$bytesRead)
+			{
+				$bytesRead = sysread $fh, $val, 1;
+				$recordId = unpack ("H2", $val);
+			}
+
+			# eof
+			last if (!$bytesRead)
+		}
+
+		push @packages, $recordId;
+
+		$bytesRead = sysread $fh, $val, 2;
+		$totalBytes += $bytesRead;
+		$recordLength = unpack ("v", $val);
+		$recordLengthH = unpack ("H2", $val);
+
+		my @flags;
+		for ($i = 0; $i < 3; $i++)
+		{
+			$bytesRead = sysread $fh, $val, 1;
+			$totalBytes += $bytesRead;
+			$flag = unpack ("C", $val);
+
+			push @flags, $flag;
+		}
+
+		$bytesRead = sysread $fh, $val, 1;
+		$totalBytes += $bytesRead;
+		$rs_cs = unpack ("C", $val); # record sequence and charge status
+
+		$bytesRead = sysread $fh, $val, 1;
+		$totalBytes += $bytesRead;
+		$ll_oil = unpack ("C", $val); # lac length (first 3 bits) and owner id length (last 5 bits)
+
+		$ownerIdLength = calcLength($ll_oil);
+		$bytesRead = sysread $fh, $val, $ownerIdLength;
+		$totalBytes += $bytesRead;
+		$ownerDN = unpack ("H*", $val); # BCD
+
+
+		# packages
+		my $morePackages = 1;
+		while ($morePackages)
+		{
+			$bytesRead = sysread $fh, $val, 1;
+			$totalBytes += $bytesRead;
+			$packageNumber = uc(unpack ("H2", $val));
+
+			# this flag is set in the NOP (non parsed packages) section
+			# if a package has been seen but skipped it will be a NOP package
+			my $isNOP;
+			if ($packageNumber eq "64") # date/time/duration
+			{
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$year =  "20" . lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$month = lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$day = lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$hour = lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$minute = lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$seconds = lzPad(unpack ("C", $val), 2);
+
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$dateFlags = unpack ("C", $val);
+
+				$startDateTime = timelocal($seconds, $minute, $hour, $day, lzPad($month - 1, 2), $year);
+				$earliestStartDateTime = $startDateTime
+					if (!$earliestStartDateTime || $startDateTime < $earliestStartDateTime);
+
+				$bytesRead = sysread $fh, $val, 3;
+				$totalBytes += $bytesRead;
+				$duration = unpack ("v", $val); # present like XXAA CCBB:for ABC, AA least sig, so 000051 not 510000
+
+				$endDateTime = $startDateTime + $duration;
+
+				$latestEndDateTime = $endDateTime
+					if (!$latestEndDateTime || $endDateTime > $latestEndDateTime);
+			}
+			elsif ($packageNumber eq "65") # partner DN
+			{
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$nb_digits = calcLength(unpack ("C", $val));
+
+				$bytesRead = sysread $fh, $val, $nb_digits;		
+				$totalBytes += $bytesRead;
+				$partnerDN = unpack ("H*", $val);
+				$partnerDN =~ s/f//g;
+			}
+			elsif ($packageNumber eq "69") # trunk id incoming
+			{
+				$bytesRead = sysread $fh, $val, 6;
+				$totalBytes += $bytesRead;
+				$inTrunkGroupNumber = unpack ("a6", $val);
+
+				$bytesRead = sysread $fh, $val, 2;
+				$totalBytes += $bytesRead;
+				$inTrunkNumber = unpack ("v", $val);
+			}
+			elsif ($packageNumber eq "6A") # trunk id outgoing
+			{
+				$bytesRead = sysread $fh, $val, 6;
+				$totalBytes += $bytesRead;
+				$outTrunkGroupNumber = unpack ("a6", $val);
+
+				$bytesRead = sysread $fh, $val, 2;
+				$totalBytes += $bytesRead;
+				$outTrunkNumber = unpack ("v", $val);
+			}
+			elsif ($packageNumber eq "76") # digit string
+			{
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$nb_digits = calcLength(unpack ("C", $val));
+
+				$bytesRead = sysread $fh, $val, $nb_digits;
+				$totalBytes += $bytesRead;
+
+				push @nopPackages, $packageNumber;
+				# NOP
+			}
+			elsif ($packageNumber eq "78") # category
+			{
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$cat = unpack ("C", $val);
+
+				$category = $categories{$cat};
+			}
+			elsif ($packageNumber eq "6F" || $packageNumber eq "70") # fac used
+			{
+				# get the total package length
+				$bytesRead = sysread $fh, $val, 1;
+				$totalBytes += $bytesRead;
+				$length = unpack ("C", $val);
+
+				# length -2 because we read package number and the length: 2 bytes
+				$bytesRead = sysread $fh, $val, ($length - 2);
+				$totalBytes += $bytesRead;
+				push @nopPackages, $packageNumber;
+				# NOP
+
+			}
+			elsif (defined($packageBytes{$packageNumber})) # NOP
+			{
+				$bytesRead = sysread $fh, $val, $packageBytes{$packageNumber};
+				$totalBytes += $bytesRead;
+				push @nopPackages, $packageNumber;
+				# NOP
+				$isNOP = 1;
+			}
+
+			push @packages, $packageNumber unless ($isNOP);
+
+			if ($totalBytes == $recordLength)
+			{
+				$morePackages =  0 ;
+			}
+		}
+
+		if (($recordLength - $totalBytes) > 0)
+		{
+			$bytesRead = sysread $fh, $val, ($recordLength - $totalBytes);
+			$totalBytes += $bytesRead;
+			$theRest = unpack ("H*", $val);
+		}
+		
+		if ($category =~ /international/)
+		{
+			$intFlag = 1;
+		}
+		else
+		{
+			$intFlag = 0;
+		}
+
+		if ($output eq "csv")
+		{
+			my @rec;
+		
+			push @rec, $ownerDN;
+			push @rec, $partnerDN;
+			push @rec, '"' . getPrintDate($startDateTime) . "-" . getPrintTime($startDateTime) . '"'; # quoted
+			push @rec, '"' . getPrintDate($endDateTime) . "-" . getPrintTime($endDateTime) . '"'; # quoted
+			push @rec, $duration;
+			push @rec, $inTrunkGroupNumber;
+			push @rec, $inTrunkNumber;
+			push @rec, $outTrunkGroupNumber;
+			push @rec, $outTrunkNumber;
+			push @rec, $intFlag;
+
+			print join ",", @rec, "\n";;
+		}
+		elsif ($output eq "specific")
+		{
+			$recordNumber++;
+			print "-" x 80 . "\n";
+			print "Record Number=$recordNumber\n";
+
+			print "Record Id=[$recordId]\n";
+			print "Record Length=[$recordLength]\n";
+			print "Flags=[" , join ",", @flags , "]\n";
+			print "RS CS=[$rs_cs]\n";
+			print "LL OIL=[$ll_oil]\n";
+			print "Owner DN=[$ownerDN]\n";
+			print "Partner DN=[$partnerDN]\n";
+			print "Date=[$year $month $day $hour $minute $seconds]\n";
+			print "Start Date=" . getPrintDate($startDateTime) . "\n";
+			print "Start Time=" . getPrintTime($startDateTime) . "\n";
+			print "End Date=" . getPrintDate($endDateTime) . "\n";
+			print "End Time=" . getPrintTime($endDateTime) . "\n";
+			print "Duration=[$duration]\n";
+			print "Category=[$category]\n";
+			print "IN Trunk Group=[$inTrunkGroupNumber]\n";
+			print "IN Trunk Number=[$inTrunkNumber]\n";
+			print "OUT Trunk Group=[$outTrunkGroupNumber]\n";
+			print "OUT Trunk Number=[$outTrunkNumber]\n";
+			$p = join ",", @packages;
+			print "Packages=[$p]\n";
+			$p = join ",", @nopPackages;
+			print "NOP Packages=[$p]\n";
+		}
+	}
+}
+
+#left pad with zeros
+sub lzPad
+{
+	my $val = shift;
+	my $len = shift;
+
+	$val = "0" . $val until (length ($val) == $len);
+
+	return $val;
+}
+
+sub getPrintDate
+{
+	my $time = shift;
+
+	my ($day,$mon,$year) = (localtime($time))[3,4,5];
+
+	$mon = lzPad($mon + 1, 2);
+	$year = 1900 + $year;
+
+	return "$year/$mon/$day";
+}
+
+sub getPrintTime
+{
+	my $time = shift;
+
+	my ($sec,$min,$hour) = (localtime($time))[0,1,2];
+	$hour = lzPad($hour, 2);
+	$min = lzPad($min, 2);
+	$sec = lzPad($sec, 2);
+
+	return "$hour-$min-$sec";
+}
+
+sub calcLength
+{
+	my $val = shift;	
+	return (int (($val + 1) / 2));
+}
+
+sub getRecord
+{
+  my @record;
+  my $bytesRead = sysread $fh, $val, 1;
+  $recordId = unpack ("H2", $val);
+  push @record, $val;
+
+  $bytesRead = sysread $fh, $val, 2;
+  $recordLength = unpack ("C", $val);
+  push @record, $val;
+
+  for ($i = 0; $i < ($recordLength - 3); $i++)
+  {
+    $bytesRead = sysread ($fh, $val, 1);
+		return undef if ($bytesRead = 0);
+    push @record, $val;
+  }
+
+  return @record;
+}
+
+# directory recursion
+sub parseDir
+{
+	my $toparse = shift;
+	opendir(DIR, $toparse) || warn "Error opening the directory $toCopy :$! \n";
+	my @dirContents = readdir DIR;
+	closedir DIR || warn "Error closing directory $toCopy :$! \n";
+	@dirContents = sort @dirContents;
+
+	my $fullPath;
+	foreach my $shortPath (@dirContents) 
+	{
+		next if ($shortPath =~ /^\.{1,2}$/);
+		$fullPath = "$toparse/$shortPath";
+		if (-d $fullPath)
+		{
+			parseDir("$fullPath");
+		}
+		else
+		{
+			push @fileArray, $fullPath;
+		}
+	}
+}
+
+# put subs below here
+
+# display some help
+sub usage
+{
+	my $script = $0;
+	my @parts = split /\//, $script;
+	$script = pop(@parts);
+	$script =~ s/\.\///;
+	print "	$script Version: $version\n\n";
+	print "	USAGE:\n\n";
+	print "		$script OPTIONS {dirname|filename+}\n\n";
+	print "\n";
+	print "	OPTIONS:\n";
+	print "		 -c, --csv         Output format is csv [default].\n";
+	print "		 -f, --file        Specify filename.\n";
+	print "		 -h, --help        Display this usage screen.\n";
+	print "		 -n, --none        Output is supressed.\n";
+	print "		 -s, --specific    Output format is format specific.\n";
+	print "		 -t, --transform   Transform output according to mediation rules.\n";
+	print "		 -v, --version     Display version information.\n";
+	print "\n";
+	print "	NOTES:\n";
+	print " 		If dirname is specified, recurse.\n";
+
+	exit;
+}
+
+# process the arguments -- add as necessary
+sub getArgs
+{
+	while (@_)
+	{
+		my $thing;
+		my $arg = shift;
+		if ($arg =~ /-h/ || $arg =~ /--help/)
+		{
+			usage();
+			exit;
+		}
+		elsif ($arg =~ /-v/ || $arg =~ /--version/)
+		{
+			print "Version: $version\n";
+			exit;
+		}
+		elsif ($arg =~ /-f/ || $arg =~ /--file/)
+		{
+			$thing = shift;
+		}
+		elsif ($arg =~ /-c/ || $arg =~ /--csv/)
+		{
+			$output = "csv";
+		}
+		elsif ($arg =~ /-n/ || $arg =~ /--none/)
+		{
+			$output = "none";
+		}
+		elsif ($arg =~ /-s/ || $arg =~ /--specific/)
+		{
+			$output = "specific";
+		}
+		elsif ($arg =~ /-t/ || $arg =~ /--transform/)
+		{
+			$transform = 1;
+		}
+		elsif (-e $arg)
+		{
+			$thing = $arg;
+		}
+
+		push @files, abs_path($thing) if (-e $thing);
+	}
+}
+
+
+=head1 NAME
+
+read.ewsd - Siemens EWSD AMA reader.
+
+
+=head1 SYNOPSIS
+
+B<read.ewsd> [OPTION] filename
+
+=head1 DESCRIPTION
+
+Read a Siemens EWSD AMA file.
+
+=head2 OPTIONS        
+
+Should include options and parameters.
+
+
+B<-c, --csv>
+        output format is csv.
+
+B<-f, --file>
+        optional flag to designate file
+
+B<-h, --help>
+        display some help and usage.
+
+B<-n, --none>
+        output is suppressed.
+
+B<-s, --specific>
+        output format is format specific.
+
+B<-t, --transform>
+        transform output acording to mediation rules.
+
+B<-v, --version>
+        display version information.
+
+
+=head1 USAGE
+
+Usage information goes here.
+
+
+=head1 EXAMPLES
+
+To show the output in a friendly human readable format
+
+read.ewsd --specific somefile
+
+To show output in csv, and recurse through directories.
+
+read.ewsd dirname
+
+
+
+=head1 RETURN VALUES  
+
+Sections two and three function calls.
+
+=head1 ENVIRONMENT    
+
+Describe environment variables.
+
+=head1 FILES          
+
+Files associated with the subject.
+
+=head1 DIAGNOSTICS    
+
+Normally used for section 4 device interface diagnostics.
+
+=head1 ERRORS         
+
+Sections two and three error and signal handling.
+
+=head1 SEE ALSO       
+
+Cross references and citations.
+
+=head1 STANDARDS      
+
+Conformance to standards if applicable.
+
+=head1 BUGS           
+
+Bugs added as required.
+
+=head1 SECURITY CONSIDERATIONS
+
+=head1 COPYRIGHT
+
+Copyright 2004, Cartesian Limited: Morgan Sziraki
+
+=cut
+

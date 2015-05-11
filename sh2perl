@@ -1,0 +1,62 @@
+#!/usr/bin/perl
+
+## version 0.03
+
+print <<'HEAD', <>, <<'FOOT';
+#!/usr/bin/perl
+exec '/bin/sh', '-c', <<'StuffyFunk', $0, @ARGV;
+HEAD
+StuffyFunk
+FOOT
+
+=head1 NAME
+
+sh2perl - convert Bourne shell script to Perl program
+
+=head1 SYNOPSIS
+
+ sh2perl shell-script >perl-program
+ sh2perl <shell-script | perl - shellarg1 shellarg2 shellarg3 ...
+
+=head1 DESCRIPTION
+
+sh2perl takes a shell script specified on the command line (or
+from standard input) and produces a comparable Perl script 
+on the standard output.
+
+The program should operate identically within the scope of the
+possible emulation, and at speeds comparable, if not faster,
+than the original shell script.
+
+=head1 SEE ALSO
+
+L<a2p>, L<s2p>, L<perl>
+
+=head1 AUTHOR
+
+Randal L. Schwartz, C<merlyn@stonehenge.com>,
+C<http://www.stonehenge.com/merlyn/>.
+
+=head1 BUGS
+
+If your shell script contains a single line consisting of:
+
+  StuffyFunk
+
+all following text will be ignored.  Future versions of I<sh2perl>
+may eliminate this bug.
+
+Handles the One True Shell (C</bin/sh>) only.  Other shells will
+probably not be supported.  (Use the I<csh2sh> tool first on
+C-shell scripts.)
+
+=head1 Y2K COMPLIANCE
+
+This distribution has no known Y2K problems.
+
+=head1 PERL TRAINING
+
+Learn Perl now!  Visit our website at
+C<http://www.stonehenge.com/perltraining/>!
+
+=cut

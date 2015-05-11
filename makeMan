@@ -1,0 +1,139 @@
+#!/usr/bin/perl
+
+##################################################
+# script   : makeMan
+# author   : Cartesian Limited
+# author   : msziraki
+# date     : Thu Aug 19 12:41:15 BST 2004
+# $Revision: 1.6 
+##################################################
+$version = "$Revision: 1.6 $number";
+
+# N.B.: add lexically scoped variables and assign them in getArgs ($file, below)
+my $file;
+
+
+my $file = shift;
+`pod2man $file > ~/man/man1/$file.1`;
+`gzip -9 ~/man/man1/$file.1`;
+
+
+
+# put subs below here
+
+# display some help
+sub usage
+{
+	my $script = $0;
+	my @parts = split /\//, $script;
+	$script = pop(@parts);
+	$script =~ s/\.\///;
+	print "	$script Version: $version\n\n";
+	print "	USAGE:\n\n";
+	print "		$script [{-h|--help}] [{-v|--version}] {-f|--file} filename\n\n";
+	print "\n";
+	print "	ARGUMENTS:\n";
+	print "		 -h, --help        Display this usage screen.\n";
+	print "		 -v, --version     Display version information.\n";
+	print "		 -f, --file        Specify filename.\n";
+	print "\n";
+	print "	NOTES:\n";
+}
+
+# process the arguments -- add as necessary
+sub getArgs
+{
+	while (@_)
+	{
+		my $arg = shift;
+		if ($arg =~ /-h/ || $arg =~ /--help/)
+		{
+			usage();
+			exit;
+		}
+		elsif ($arg =~ /-v/ || $arg =~ /--version/)
+		{
+			print "Version: $version\n";
+			exit;
+		}
+		elsif ($arg =~ /-f/ || $arg =~ /--file/)
+		{
+			$file = shift;
+		}
+	}
+}
+
+
+=head1 NAME
+
+makeMan - Some short description
+
+
+=head1 SYNOPSIS
+
+B<makeMan> [OPTION] ...
+
+=head1 DESCRIPTION
+
+Place a desription of this here.
+
+B<-h, --help>
+        display some help and usage.
+
+B<-v, --version>
+        display version information.
+
+
+=head1 USAGE
+
+Usage information goes here.
+
+
+=head1 EXAMPLES
+
+Place examples here.
+
+=head1 OPTIONS        
+
+Should include options and parameters.
+
+=head1 RETURN VALUES  
+
+Sections two and three function calls.
+
+=head1 ENVIRONMENT    
+
+Describe environment variables.
+
+=head1 FILES          
+
+Files associated with the subject.
+
+=head1 DIAGNOSTICS    
+
+Normally used for section 4 device interface diagnostics.
+
+=head1 ERRORS         
+
+Sections two and three error and signal handling.
+
+=head1 SEE ALSO       
+
+Cross references and citations.
+
+=head1 STANDARDS      
+
+Conformance to standards if applicable.
+
+=head1 BUGS           
+
+Gotchas and caveats.
+
+=head1 SECURITY CONSIDERATIONS
+
+=head1 COPYRIGHT
+
+Copyright 2004, Cartesian Limited
+
+=cut
+
