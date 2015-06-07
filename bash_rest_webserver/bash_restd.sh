@@ -7,6 +7,7 @@ mkfifo HTTP_PIPE
 trap "rm -f HTTP_PIPE" EXIT
 while true
 do
+  sleep 0.3 # short nap to stop this getting confused
   cat HTTP_PIPE | nc -l $PORT > >( 
     export HTTP_REQUEST=
     while read input
