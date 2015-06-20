@@ -27,7 +27,15 @@ do
 
         if echo $HTTP_REQUEST | grep -qE '^/echo/'
         then
-            printf "%s\n%s %s\n\n%s\n" "$HTTP_STATUS_200" "$HTTP_REQ_LOC" $HTTP_REQUEST ${HTTP_REQUEST#"/echo/"} > HTTP_PIPE
+						TARGET=${HTTP_REQUEST#"/echo/"}
+            printf "%s\n%s %s\n\n%s\n" "$HTTP_STATUS_200" "$HTTP_REQ_LOC" $HTTP_REQUEST $TARGET > HTTP_PIPE
+#        elif echo $HTTP_REQUEST | grep -qE '^/do'
+#        then
+#						#TARGET=${HTTP_REQUEST#"/do/"}
+#						T=${HTTP_REQUEST#"/do/"}
+#						TARGET=`echo $T | sed 's/,/ /g'`
+#						RESULT=`$TARGET`
+#            printf "%s\n%s %s\n\n%s\n" "$HTTP_STATUS_200" "$HTTP_REQ_LOC" $HTTP_REQUEST $RESULT > HTTP_PIPE
         elif echo $HTTP_REQUEST | grep -qE '^/help'
         then
             echo "Supported targets: /help /echo/something /src" > HTTP_PIPE
