@@ -1,0 +1,647 @@
+#!/usr/local/bin/perl
+
+##################################################
+# script   : db2csv
+# author   : Cartesian Limited
+# author   : msziraki
+# date     : Wed Aug 11 11:02:52 BST 2004
+# $Revision: 1.6 $number
+# purpose  : dump a database schema, or set of tables
+#            to csv files.
+#            run with --help for usage
+# requires : DBI(3)
+##################################################
+$version = "$Revision: 1.6 $number";
+
+use DBI;
+
+# N.B.: add lexically scoped variables and assign them in getArgs ($file, below)
+my $schema;
+my @tables;
+my $sid = $ENV{ORACLE_SID};
+my $pass;
+my $outputDir = "";
+
+my $debug;
+my $quiet;
+my $veryQuiet;
+my $useCompression;
+my $zipCmd = "gzip -q9"; 
+my $enclose;
+my $encloseCharacter = '"';
+my $includeViews;
+my $longReadLen = 10485760; # 10M LONG col len
+my $ctrlFilePath;
+my $sqlFile;
+my $outputFileName;
+my $extension;
+
+getArgs(@ARGV);
+
+print "For help and usage type:$0 --help\n" unless ($veryQuiet);
+
+# if using arbitrary SQL we need to ensure a filename
+# is present for output
+if ($sqlFile and not $outputFileName)
+{
+	$outputFileName = $sqlFile;
+	$outputFileName =~ s/\..*$//;
+}
+
+
+$sid = promptUser("Enter ORACLE SID", $sid);
+
+unless ($schema)
+{
+	$schema = promptUser("Enter schema name") until ($schema);
+}
+
+unless ($pass)
+{
+	$pass = promptUser("Enter password") until ($pass);
+}
+
+unless ($useCompression)
+{
+	$useCompression = promptUser("Use compression", "N") until ($useCompression);
+  $useCompression = undef unless ($useCompression =~ /Y/i);
+}
+
+unless ($includeViews or $sqlFile)
+{
+	$includeViews = promptUser("Include views in table list", "N") until ($includeViews);
+  $includeViews = undef unless ($includeViews =~ /Y/i);
+}
+
+if (defined $sqlFile and not -f $sqlFile)
+{
+	die ("File: [$sqlFile] does not exist\n");
+}
+
+my $dbh = DBI->connect("dbi:Oracle:$sid",
+                            $schema,
+                            $pass,
+                            \%DBIattributes );
+#$dbh->{AutoCommit}    = 0;
+$dbh->{RaiseError}    = 1;
+$dbh->{ora_check_sql} = 0;
+$dbh->{RowCacheSize}  = 16;
+$dbh->{LongReadLen}   = $longReadLen; # max length of LONG fields like LOBS
+$dbh->{LongTruncOk}   = 0;            # trucate if longer than LongReadLen ?
+
+if ($sqlFile and $outputFileName)
+{
+	open IN, $sqlFile;
+	my $sql = join " ", <IN>;
+	close IN;
+	doSql($sql, $outputFileName);
+}
+else
+{
+	if (@tables)
+	{
+		displayTables();
+
+		unless ($quiet)
+		{
+			my $response = promptUser("Add more tables ?", "N");
+
+			if (uc($response) =~ /Y/)
+			{
+				addTables();
+				displayTables();
+			}
+		}
+	} 
+	else
+	{
+		my $response = promptUser("Dump whole schema: $schema ?", "N");
+		if (uc($response) =~ /N/)
+		{
+			addTables();
+			displayTables();
+		}
+		else
+		{
+			addAllTables();
+			displayTables();
+		}
+	}
+
+	my %ctrlFileInfo = loadCtrlFiles() if ($ctrlFilePath);
+
+	unless ($quiet)
+	{
+		my $response = promptUser("Continue?", "Yes");
+
+		unless(uc($response) =~ /Y/)
+		{
+			print "Aborting\n";
+		}
+	}
+	#dumpTables();
+	dumpTab();
+}
+
+print "Done...\n" unless ($veryQuiet);;
+$dbh->disconnect();
+
+sub dumpTab
+{
+	foreach my $table (@tables)
+	{
+		$table = uc($table);
+
+    # get optionally enclosed by
+    my $optionallyEnclosedBy; #default to QUOTE
+    if (exists ($ctrlFileInfo{$table}{optionallyEnclosedBy}))
+    {
+       $optionallyEnclosedBy = $ctrlFileInfo{$table}{optionallyEnclosedBy};
+    }
+
+    # build SQL
+    my $sql = "select ";
+    my $prependComma = 0;
+    my @columns = getColumns($table);
+    my @columnNames;
+    foreach my $elt (@columns)
+    {
+      my ($columnName, $dataType) = split /:/, $elt;
+      my $column = $columnName; # just in case we transform the column
+      push @columnNames, $columnName;
+
+      # fix DATE format from control file
+      if (exists ($ctrlFileInfo{$table}{$columnName}{formatString}))
+      {
+        my $formatString = $ctrlFileInfo{$table}{$columnName}{formatString};
+        $column = "to_char($column,'$formatString')";
+      }
+      $sql .= "," if ($prependComma++);
+      $sql .= $column;
+    }
+    $sql .= " from $table";
+
+		doSql($sql, $table);
+	}
+  
+}
+
+sub doSql
+{
+	my ($sql, $filename) = @_;
+
+	my $sth = $dbh->prepare($sql);
+	$sth->execute();
+
+	print "SQL $sql\n" if ($debug);
+
+	# OUTPUT
+	$outputDir .= "/" if ($outputDir);
+	$filename .= ".$extension" if ($extension);
+	my $file = $outputDir . "$filename";
+	
+	# output to a gzip stream was specified
+	if ($useCompression)
+	{
+		open OUT, "| $zipCmd >$file\.gz";
+	}
+	else
+	{
+		open OUT, ">$file";
+	}
+
+	while (@fields = $sth->fetchrow_array())
+	{
+		my $prependComma = 0;
+		my $line;
+		my $offset = 0;
+		foreach my $field (@fields)
+		{
+			#NOT WORKING YET
+			# use control file settings if exist for ENCLOSED BY statements
+			if (exists ($ctrlFileInfo{$table}{$columnNames[$offset]}{enclosedBy}))
+			{
+				my $enclosedBy = $ctrlFileInfo{$table}{$columnNames[$offset]}{enclosedBy};
+				$field = "$enclosedBy" . $field . "$enclosedBy";
+			}
+			# auto enclose if contains comma
+			elsif ($field =~ /,/)
+			{
+				# check if -c was passed ctrl file parsing in effect
+				if ($optionallyEnclosedBy)
+				{
+					$field = "$optionallyEnclosedBy" . $field . "$optionallyEnclosedBy";
+				}
+				# use the default
+				else
+				{
+					$field = "$encloseCharacter" . $field . "$encloseCharacter";
+				}
+			}
+
+			$line .= "," if ($prependComma++);
+			$line .= $field;
+
+			$offset++;
+		}
+		$line =~ s/\n/\\n/g; # inline LOB fix TODO: LOBFILE
+		print OUT "$line\n";
+	}
+
+	close OUT;
+	$sth->finish();
+}
+
+sub getColumns
+{
+	my $table = shift;
+
+	my @columns;
+
+	my $sql =
+	"
+    select
+      u.column_name,
+      u.DATA_TYPE
+    from
+      cols u
+    where 1=1
+			and u.table_name = ?
+    order by u.COLUMN_ID
+	";
+
+  print "SQL=$sql : table_name = $table\n" if ($debug);
+
+	my $sth = $dbh->prepare($sql);
+	$sth->execute($table);
+
+	while (($column, $dataType) = $sth->fetchrow_array())
+	{
+    print "COLUMN,DATATYPE=$column,$dataType\n" if ($debug);
+		push @columns, "$column:$dataType";
+	}
+
+	$sth->finish();
+
+	return @columns;
+}
+
+sub addAllTables
+{
+	push @tables, getTablesInSchema();
+}
+
+sub getTablesInSchema
+{
+	my @tables;
+	my $sql = "select tname from tab where tabtype = 'TABLE'";
+  $sql .= " or tabtype = 'VIEW'" if ($includeViews);
+
+	my $sth = $dbh->prepare($sql);
+	$sth->execute();
+	print "Tables in schema: $schema are ...\n";
+	while (($table) = $sth->fetchrow_array())
+	{
+		push @tables, $table;
+	}
+
+	$sth->finish();
+
+	return @tables;
+}
+
+sub listTablesInSchema
+{
+	foreach $table (getTablesInSchema())
+	{
+		print "$table\n";
+	}
+}
+
+sub addTables
+{
+	listTablesInSchema();
+	my $add = 1;
+	while ($add)
+	{
+		my $table = promptUser("Table name [<CR> alone when finished adding tables]");
+		if (length($table) > 0)
+		{
+			push @tables, $table;
+		}
+		else
+		{
+			$add = undef;
+		}
+	}
+}
+
+sub displayTables
+{
+	unless ($veryQuiet)
+	{
+		my $message = "Table to dump is:";
+		if (scalar(@tables) > 1)
+		{
+			$message = "Tables to dump are:";
+		}
+		print "$message\n";
+		foreach $table (@tables)
+		{
+			print "  $table\n";
+		}
+	}
+}
+sub promptUser 
+{
+	my ($promptString,$defaultValue) = @_;
+
+  return $defaultValue if ($quiet and $defaultValue);
+
+	if ($defaultValue) 
+	{
+		print $promptString, "[", $defaultValue, "]: ";
+	} 
+	else 
+	{
+		print $promptString, ": ";
+	}
+
+	$| = 1;   # force a flush after our print
+	my $x = <STDIN>;    # get the input from STDIN (presumably the keyboard)
+
+	chomp $x;
+
+	if ($defaultValue) 
+	{
+		return $x ? $x : $defaultValue;    # return $x if it has a value
+	} 
+	else 
+	{
+		return $x;
+	}
+}
+
+sub loadCtrlFiles
+{
+  my %ctrlFileHash;
+
+  #---------------------------------------------------
+  # first a block to test we're being called correctly
+  #---------------------------------------------------
+  my @messages;
+  unless (-e $ctrlFilePath)
+  {
+    push @messages, "Directory:[$ctrlFilePath] does not exist\n";
+  }
+  unless (-d $ctrlFilePath)
+  {
+    push @messages, "[$ctrlFilePath] is not a directory\n";
+  }
+  if (scalar(@messages))
+  {
+    unless ($quiet)
+    {
+      foreach my $msg (@messages)
+      {
+        print $msg;
+      }
+    }
+
+    return undef;
+  }
+
+  my $cmd = "find $ctrlFilePath -type f " . ' | grep ctrl$ | grep ' .  $schema;
+  print "FIND CMD: $cmd\n" if ($debug);
+  my @files = `$cmd`;
+  
+  foreach my $file (@files)
+  {
+    chomp $file;
+    print "FOUND ctrl file: [$file]\n" unless ($quiet);
+
+    my @parts = split /\//, $file;
+    my $name = pop @parts;
+    $name =~ s/\.ctrl//;
+
+    if (grep(/$name/, @tables))
+    {
+      my $beginColumns;
+      my $optionallyEnclosedBy;
+      open IN, $file;
+      while (<IN>)
+      {
+        chomp;
+
+        s/^\s*//;
+
+        my $line = $_;
+        $line =~ s/\s//g;
+        next if ($line eq ")"); # end of columns
+        $beginColumns++ if ($beginColumns);
+        $beginColumns = 1 if ($line eq "(");
+
+        my $enclosedBy;
+        if (/OPTIONALLY ENCLOSED BY/)
+        {
+          $optionallyEnclosedBy = $_;
+          $optionallyEnclosedBy =~ s/.*'(.*)'/$1/;
+        }
+
+        next unless ($beginColumns > 1);
+
+        # now we're between the ( and ) which means each line is now a column spec
+        my $enclosedBy;
+        if (/ENCLOSED BY/)
+        {
+          $enclosedBy = $_;
+          $enclosedBy =~ s/.*ENCLOSED BY '(.*)'/$1/;
+        }
+      
+        my ($columnName, $dataType, $formatString);
+        ($columnName, @dummy) = split / /;
+        if (/ DATE /)
+        {
+          s/,$//;      # remove trailing comma
+          s/^\s*//;    # remove whitespace at begining
+          s/\s+/ /g;   # shrink to single spaces 
+          ($columnName, $dataType, $formatString) = split / /;
+          $formatString =~ s/"//g;
+        }
+
+        $columnName =~ s/[^_A-Z0-9]//g;
+        if ($formatString)
+        {
+          $ctrlFileHash{$name}{$columnName}{formatString} = $formatString;
+          print "$name\.$columnName: DATE FORMAT STRING = [$formatString]\n" if ($debug);
+        }
+
+        if ($enclosedBy)
+        {
+          $ctrlFileHash{$name}{$columnName}{enclosedBy} = $enclosedBy;
+          print "$name\.$columnName: ENCLOSED BY = [$enclosedBy]\n" if ($debug);
+        }
+      }
+      close IN;
+
+      $ctrlFileHash{$name}{optionallyEnclosedBy} = $optionallyEnclosedBy if ($optionallyEnclosedBy);
+    }
+  }
+
+  return %ctrlFileHash;
+}
+
+
+# display some help
+sub usage
+{
+	my $script = $0;
+  my @parts = split /\//, $script;
+  $script = pop(@parts);
+	$script =~ s/\.\///;
+	print " $script Version: $version\n\n";
+	print " USAGE:\n\n";
+	print "  $script [ARGUMENTS]\n";
+	print "\n";
+	print " ARGUMENTS: \n";
+  print "   UNARY\n\n";
+	print "    -h, --help              Display this usage screen.\n";
+	print "    -V, --version           Display version information.\n";
+	print "    -D, --debug             Debug mode\n";
+	print "    -q, --quiet             Be quiet. Use default for all options.\n";
+	print "    -Q, --very-quiet        Be very quiet. Same as quiet but no output.\n";
+	print "    -v, --views             Include views in list of tables to dump.\n";
+	print "    -z, --zip               Output to a gzip stream.\n\n";
+  print "   BINARY\n";
+	print "    -d, --dir            PATH       Specify output directory.\n";
+	print "    -c, --ctrl-file-path PATH       Specify PATH to ctrl files. *see note below\n";
+	print "    -e, --enclose        CHAR       Specify ENCLOSE character.\n";
+	print "        --extension                 Specify output filename extension.\n";
+	print "    -f, --file           CHAR       Specify filename containing SQL to execute instead of table or view.\n"; 
+	print "        --long-read-len  INT        Specify largest length of LONG types (bytes).\n";
+	print "    -n, --out-file-name  CHAR       Specify name of output filename.\n"; 
+	print "    -o, --oracle-sid     ORACLE_SID Specify ORACLE SID.\n";
+	print "    -p, --password       PASS       Specify password.\n";
+	print "    -s, --schema         SCHEMA     Specify schema to dump.\n";
+	print "    -t, --table          TABLE      Specify table to dump (OK 2 specify multiple -t args).\n";
+	print "    -Z, --zip-cmd        COMMAND    Specify command to use for compression.\n";
+	print "\n";
+	print " NOTES:\n";
+  print "    Example to dump a table to /tmp using compression, suitable from cron\n\n";
+  print "    $script -z -Q -d /tmp -o DB01 -s HUMRES -p s3cr3t -t EMPLOYEE_DETAILS\n\n"; 
+	print "\n";
+	print "    --ctrl-file-path PATH\n";
+	print "         Set this to search directories under PATH for ctrl files matching\n";
+	print "         the name of the table being dumped [EMPLOYEE_DETAILS.ctrl when dumping EMPLOYEE_DETAILS].\n";
+	print "         The ctrl file will be used to dump data in a format suitable to be loaded in by that ctrl file.\n";
+	print "         Example DATE fields will be dumped in the format specified instead of Oracle's default.\n";
+	print "\n";
+	print "    -enclose CHAR\n";
+	print "         This will override the default character: \".\n";
+	print "         If ctrl files are not being parsed skip to (3):\n";
+	print "            1) check field level for 'ENCLOSE BY' statement, always enclose this field\n";
+	print "            2) next check for commas, fields with commas will be enclosed by the OPTIONALLY ENCLOSED BY character\n";
+	print "            3) if for some reason OPTIONALLY ENCLOSED BY has not been specified use --enclose CHAR (defaults to: \")\n";
+	print "\n";
+
+	exit;
+}
+
+# process the arguments -- add as necessary
+sub getArgs
+{
+	while (@_)
+	{
+		my $arg = shift;
+		if ($arg =~ /-h/ || $arg =~ /--help/)
+		{
+			usage();
+			exit;
+		}
+		elsif ($arg =~ /-V/ || $arg =~ /--version/)
+		{
+			print "Version: $version\n";
+			exit;
+		}
+		elsif ($arg =~ /-e/ || $arg =~ /--enclose/)
+		{
+      $enclose = "Y";
+			$encloseCharacter = '"';
+      
+      # called in binary form to specify enclose char
+      if (length($_[0]) and $_[0] !~ /^-/)
+      {
+        $encloseCharacter = shift;
+      }
+		}
+		elsif ($arg =~ /--extension/)
+		{
+			$extension = shift;
+		}
+		elsif ($arg =~ /-D/ || $arg =~ /--debug/)
+		{
+			$debug = 1;
+		}
+		elsif ($arg =~ /-c/ || $arg =~ /--ctrl-file-path/)
+		{
+			$ctrlFilePath = shift;
+		}
+		elsif ($arg =~ /-s/ || $arg =~ /--schema/)
+		{
+			$schema = shift;
+		}
+		elsif ($arg =~ /-p/ || $arg =~ /--password/)
+		{
+			$pass = shift;
+		}
+		elsif ($arg =~ /-d/ || $arg =~ /--dir/)
+		{
+			$outputDir = shift;
+		}
+		elsif ($arg =~ /--long-read-len/)
+		{
+			$longReadLen = shift;
+		}
+		elsif ($arg =~ /-f/ || $arg =~ /--file/)
+		{
+			$sqlFile = shift;
+		}
+		elsif ($arg =~ /-n/ || $arg =~ /--out-file-name/)
+		{
+			$outputFileName = shift;
+		}
+		elsif ($arg =~ /-o/ || $arg =~ /--oracle-sid/)
+		{
+			$quiet = 1; # choose defaults because cmd line arg -o
+			$sid = shift;
+		}
+		elsif ($arg =~ /-Q/ || $arg =~ /--very-quiet/)
+		{
+			$quiet = "Y";
+			$veryQuiet = "Y";
+		}
+		elsif ($arg =~ /-q/ || $arg =~ /--quiet/)
+		{
+			$quiet = "Y";
+		}
+		elsif ($arg =~ /-t/ || $arg =~ /--table/)
+		{
+			my $table = shift;
+			push @tables, $table;
+		}
+		elsif ($arg =~ /-v/ || $arg =~ /--views/)
+		{
+      $includeViews = "Y";
+		}
+		elsif ($arg =~ /-z/ || $arg =~ /--zip/)
+		{
+			$useCompression = "Y";
+		}
+		elsif ($arg =~ /-Z/ || $arg =~ /--zip-cmd/)
+		{
+			$zipCmd = shift;
+		}
+		shift @ARGV;
+	}
+}
+
