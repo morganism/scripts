@@ -2,20 +2,28 @@
 
 ##################################################
 # script   : db2csv
-# author   : Cartesian Limited
-# author   : msziraki
+# author   : morgan.sziraki@gmail.com
 # date     : Wed Aug 11 11:02:52 BST 2004
 # $Revision: 1.6 $number
 # purpose  : dump a database schema, or set of tables
 #            to csv files.
+# vendor     Oracle
 #            run with --help for usage
 # requires : DBI(3)
+#
+# I know this is poorly designed, !! it was never designed !!
+# it started as a few lines of perl to dump a table
+# then a whole schema, then delimiter opts, and enclose chars
+# after a while it could dump LOBs and read ctrl files 
+# for variable date formats .. it works
+#
 ##################################################
 $version = "$Revision: 1.6 $number";
 
 use DBI;
 
 # N.B.: add lexically scoped variables and assign them in getArgs ($file, below)
+# intentionally not using get opts 
 my $schema;
 my @tables;
 my $sid = $ENV{ORACLE_SID};
